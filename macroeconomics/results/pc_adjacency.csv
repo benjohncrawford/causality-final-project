@@ -1,0 +1,26 @@
+,"SP500
+Return",VIX,"FedFunds
+Δ","CPI
+YoY","Unemploy
+Δ","M2
+Growth","Sentiment
+Δ","Oil
+Return","10Y Treas
+Δ"
+"SP500
+Return",0,1,0,1,0,0,0,1,0
+VIX,-1,0,-1,0,0,-1,0,0,0
+"FedFunds
+Δ",0,1,0,1,1,0,0,1,0
+"CPI
+YoY",-1,0,-1,0,0,0,0,0,0
+"Unemploy
+Δ",0,0,-1,0,0,0,-1,0,0
+"M2
+Growth",0,-1,0,0,0,0,0,0,0
+"Sentiment
+Δ",0,0,0,0,-1,0,0,0,0
+"Oil
+Return",-1,0,-1,0,0,0,0,0,-1
+"10Y Treas
+Δ",0,0,0,0,0,0,0,-1,0
