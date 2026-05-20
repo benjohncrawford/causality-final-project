@@ -98,7 +98,9 @@ print("CD-NOD complete.\n")
 
 # ── 3. Save adjacency matrix ──────────────────────────────────────────────────
 G_cdnod = cg_cdnod.G.graph
-
+pyd = GraphUtils.to_pydot(cg_cdnod.G)
+pyd.write_png(f'figures/cdnod_graph.png')
+print(G_cdnod)
 # CD-NOD appends a "c_indx" node — exclude it from the adjacency output
 n_vars   = len(pretty_names)
 G_vars   = G_cdnod[:n_vars, :n_vars]
@@ -126,12 +128,17 @@ from matplotlib.lines import Line2D
 G_nx = nx.DiGraph()
 G_nx.add_nodes_from(pretty_names)
 
-for i in range(n_vars):
-    for j in range(n_vars):
-        if i == j:
+for i, src in enumerate(pretty_names):
+    for j, tgt in enumerate(pretty_names):
+        if i >= j:
             continue
-        if G_vars[j, i] == 1 and G_vars[i, j] == -1:
-            G_nx.add_edge(pretty_names[i], pretty_names[j])
+        if G_cdnod[j, i] == 1 and G_cdnod[i, j] == -1:      # i → j
+            G_nx.add_edge(src, tgt, edge_type="directed")
+        elif G_cdnod[i, j] == 1 and G_cdnod[j, i] == -1:    # j → i
+            G_nx.add_edge(tgt, src, edge_type="directed")
+        elif G_cdnod[i, j] == -1 and G_cdnod[j, i] == -1:     # undirected
+            G_nx.add_edge(src, tgt, edge_type="undirected")
+            G_nx.add_edge(tgt, src, edge_type="undirected")
 
 # Color regime-sensitive nodes differently
 node_colors = []
@@ -157,11 +164,23 @@ except Exception:
     pos = nx.spring_layout(G_nx, seed=42, k=2.5)
     print("  Using spring layout")
 
+# Directed edges
+directed_edges = [
+    (u, v) for u, v, d in G_nx.edges(data=True) if d.get("edge_type") == "directed"
+]
+undirected_edges = [
+    (u, v) for u, v, d in G_nx.edges(data=True) if d.get("edge_type") == "undirected"
+]
+
 fig, ax = plt.subplots(figsize=(13, 10))
 nx.draw_networkx_nodes(G_nx, pos, ax=ax,
                        node_size=2500, node_color=node_colors,
                        edgecolors="#92400e", linewidths=1.5)
-nx.draw_networkx_edges(G_nx, pos, ax=ax,
+nx.draw_networkx_edges(G_nx, pos, ax=ax, edgelist=undirected_edges,
+                       edge_color=edge_colors, width=2.0, arrows=False,
+                       connectionstyle="arc3,rad=0.05",
+                       min_source_margin=30, min_target_margin=30)
+nx.draw_networkx_edges(G_nx, pos, ax=ax, edgelist=directed_edges,
                        edge_color=edge_colors, width=2.0,
                        arrowsize=25, arrowstyle="-|>",
                        connectionstyle="arc3,rad=0.05",
@@ -179,9 +198,9 @@ ax.set_title("CD-NOD — Nonstationary Causal Graph (α = 0.05)\n"
              f"Regimes: {', '.join(REGIME_NAMES.values())}", fontsize=13, fontweight="bold")
 ax.axis("off")
 plt.tight_layout()
-plt.savefig(f"{FIGURES_DIR}/cdnod_graph.png", dpi=150, bbox_inches="tight")
+plt.savefig(f"{FIGURES_DIR}/cdnod_graph_pretty.png", dpi=150, bbox_inches="tight")
 plt.close()
-print(f"Saved → {FIGURES_DIR}/cdnod_graph.png")
+print(f"Saved → {FIGURES_DIR}/cdnod_graph_pretty.png")
 
 
 # ── 6. Print edges & highlight regime-sensitive ones ─────────────────────────

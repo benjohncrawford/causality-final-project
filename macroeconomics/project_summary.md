@@ -7,8 +7,17 @@
 
 We collected **288 months of data (January 2001 – December 2024)** from two sources:
 
-- **Yahoo Finance**: S&P 500 (`^GSPC`), VIX (`^VIX`)
-- **FRED**: Federal Funds Rate (`FEDFUNDS`), CPI (`CPIAUCSL`), Unemployment Rate (`UNRATE`), M2 Money Supply (`M2SL`), Consumer Sentiment (`UMCSENT`), WTI Oil Price (`DCOILWTICO`), 10-Year Treasury Yield (`GS10`)
+- **Yahoo Finance**: 
+    - S&P 500 (`^GSPC`) - A stock market index tracking the performance of the top 500 performing companies listed in stock markets in the USA
+    - VIX (`^VIX`) - A popular measure of the expected volatility of the stock market based on S&P 500 index options. It is commonly referred to as the fear index. 
+- **FRED**: 
+    - Federal Funds Rate (`FEDFUNDS`) - The target interest rate set by the Federal Open Market Committee that decide the rate that banks can lend money to other institutions at. 
+    - CPI (`CPIAUCSL`) - An estimate of the level prices of various consumer goods, tracks changes in prices over time. 
+    - Unemployment Rate (`UNRATE`) - The unemployment rate represents the number of unemployed as a percentage of the labor force.
+    - M2 Money Supply (`M2SL`) - Estimates the total volume of liquid assets in the US economy. 
+    - Consumer Sentiment (`UMCSENT`) - A consumer confidence index based on survey data published by the University of Michigan, that seeks to assess how consumers in the US feel about the near and long term future of the economy. 
+    - WTI Oil Price (`DCOILWTICO`) - Tracks the price of crude oil in the US. 
+    - 10-Year Treasury Yield (`GS10`) - The interest rate that the US government pays to borrow money for 10 years, which acts as a baseline for other money lenders. 
 
 All variables were transformed to ensure stationarity before any modeling:
 
@@ -25,6 +34,8 @@ All variables were transformed to ensure stationarity before any modeling:
 | 10Y Treasury | First difference (MoM) | Level is non-stationary |
 
 All 9 transformed variables passed the **ADF stationarity test** at α = 0.05 (CPI YoY p = 0.043, all others p < 0.01).
+
+The Augmented Dickey Fuller Test (ADF) is a method of confirming stationarity.
 
 ---
 
