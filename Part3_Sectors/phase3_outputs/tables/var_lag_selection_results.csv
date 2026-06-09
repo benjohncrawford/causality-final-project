@@ -1,4 +1,0 @@
-resolution,n_obs,maxlags_used,aic_lag,bic_lag,hqic_lag,selected_lag_bic
-daily,6882,10,10,1,1,1
-weekly,1429,8,1,0,0,1
-monthly,330,4,0,0,0,1
