@@ -1,13 +1,4 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[14]:
-
-
-"""
-Phase 4: CVAR + PCMCI + XGBoost consensus for predictive lead-lag edges.
-
-"""
+# Plots
 
 import warnings
 from pathlib import Path
@@ -15,6 +6,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from matplotlib.colors import LinearSegmentedColormap
 
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
@@ -93,6 +86,34 @@ SECTOR_NAMES = {
     "^GSPC": "S&P 500",
 }
 
+# Color Palet
+C_NAVY      = "#0D2D6B" 
+C_ROYAL     = "#1A56B0"
+C_PERIWINK  = "#5B8FE8"
+C_STEEL     = "#B8CBF0" 
+C_STEM      = "#111111" 
+
+C_CVAR      = C_NAVY
+C_PCMCI     = C_PERIWINK
+C_XGB       = C_STEEL
+
+BLUE_CMAP = LinearSegmentedColormap.from_list(
+    "blue_ramp",
+    ["#FFFFFF", C_STEEL, C_PERIWINK, C_ROYAL, C_NAVY],
+)
+
+def _style_ax(ax):
+    """Apply shared axis styling to all plots."""
+    for spine in ["top", "right", "left"]:
+        ax.spines[spine].set_visible(False)
+    ax.spines["bottom"].set_color("#CCCCCC")
+    ax.spines["bottom"].set_linewidth(0.8)
+    ax.tick_params(axis="both", length=0, pad=6)
+    ax.yaxis.grid(True, color="#E5E5E5", linewidth=0.8, zorder=0)
+    ax.set_axisbelow(True)
+    ax.set_facecolor("white")
+
+
 def setup_output():
     base = Path(OUTPUT_DIR)
     (base / "tables").mkdir(parents=True, exist_ok=True)
@@ -123,11 +144,8 @@ def rank_edges(df, extra_sort=None):
     return df.sort_values(existing_cols, ascending=existing_asc, na_position="last")
 
 def load_data(path):
-
+    
     df = pd.read_csv(path)
-
-    print("Columns in input file:")
-    print(df.columns.tolist())
 
     if "Date" not in df.columns:
         raise ValueError("Input CSV must contain a Date column.")
@@ -149,9 +167,7 @@ def load_data(path):
 
     out = {}
 
-    # Case 1: already has daily / weekly / monthly stacked rows
     if freq_col is not None:
-        print(f"Using existing frequency column: {freq_col}")
 
         for freq in FREQUENCIES:
             sub = df.loc[df[freq_col] == freq, TICKERS + ["Date"]].set_index("Date")
@@ -159,13 +175,7 @@ def load_data(path):
             sub = sub.replace([np.inf, -np.inf], np.nan).dropna()
             out[freq] = sub
 
-            print(f"{freq}: {sub.shape[0]} obs, {sub.index.min().date()} – {sub.index.max().date()}")
-
         return out
-
-    # Case 2: wide raw price file, no type column
-    print("No type/resolution/frequency column found.")
-    print("Treating input as wide daily price data and converting to returns.")
 
     df = df.set_index("Date")
     prices = df[TICKERS].apply(pd.to_numeric, errors="coerce")
@@ -207,8 +217,6 @@ def load_selected_lags(phase3_dir):
 
     lag_df = pd.read_csv(lag_file)
 
-    print("Loaded Phase 3 lag selection results:")
-    print(lag_df.head())
 
     lag_col = next((c for c in lag_df.columns if c.startswith("selected_lag")), None)
 
@@ -229,14 +237,12 @@ def load_selected_lags(phase3_dir):
         if freq not in selected:
             selected[freq] = DEFAULT_LAGS[freq]
 
-    print("Selected lags used in Phase 4:")
-    print(selected)
 
     return selected
 
 
 def load_conditional_var(phase3_dir):
-
+    
     path = Path(phase3_dir) / "conditional_var_granger_fdr_adjusted_results.csv"
 
     if not path.exists():
@@ -244,9 +250,6 @@ def load_conditional_var(phase3_dir):
         return pd.DataFrame()
 
     df = pd.read_csv(path)
-
-    print(f"Loaded {len(df)} CVAR tests ({df['significant'].sum()} significant)")
-    print(df.head())
 
     return df
 
@@ -267,7 +270,6 @@ def create_lagged_dataset(data, target_col, max_lag):
 
 
 def run_xgboost(data_dict, selected_lags):
-    print("XGBoost feature importance")
 
     if not XGBOOST_AVAILABLE:
         raise RuntimeError(f"XGBoost unavailable: {XGBOOST_IMPORT_ERROR}")
@@ -359,9 +361,6 @@ def top_xgb_edges(xgb_df, top_n=XGB_TOP_N):
     return out
 
 def run_pcmci(data_dict, selected_lags):
-    if not TIGRAMITE_AVAILABLE:
-        print("PCMCI skipped because tigramite is not installed.")
-        return pd.DataFrame()
 
     rows = []
 
@@ -413,8 +412,6 @@ def run_pcmci(data_dict, selected_lags):
                             "significant": p < ALPHA,
                         })
 
-            print(f"{resolution}: PCMCI done")
-
         except Exception as exc:
             print(f"{resolution}: PCMCI failed ({exc})")
 
@@ -462,7 +459,7 @@ def build_consensus(cvar_df, xgb_top, pcmci_df):
                         row["conditional_var_p_adj"] = hit.iloc[0]["p_adj"]
                         row["conditional_var_edge"] = bool(hit.iloc[0]["significant"])
 
-                # XGBoost top edge
+                # XGBoost
                 if len(xgb_top):
                     hit = xgb_top[
                         (xgb_top["resolution"] == resolution)
@@ -536,78 +533,104 @@ def save_derived_tables(consensus):
 
     strong.to_csv(Path(OUTPUT_DIR) / "tables" / "strongest_consensus_edges.csv", index=False)
 
-    print(
-        f"consensus: {len(consensus)} edges, "
-        f"score>=2: {len(strong)}, "
-        f"core=2: {(consensus['core_causal_score'] == 2).sum()}"
-    )
-
 
 ### Plots
 
 def plot_sp500_sector_ranking(sp500_rank, fig_dir):
+
     df = sp500_rank.copy()
     df["sector_label"] = df["cause"].map(label_sector)
-    df = df.sort_values("total_conditional_score", ascending=True)
+    df = df.sort_values(
+        ["core_causal_score", "total_conditional_score"],
+        ascending=[True, True]
+    )
 
-    plt.figure(figsize=(10, 6))
-    plt.barh(df["sector_label"], df["total_conditional_score"])
+    max_score = df["core_causal_score"].max() or 1
+    bar_colors = [
+        BLUE_CMAP(v / max_score) for v in df["core_causal_score"]
+    ]
 
-    plt.xlabel("Total Consensus Score")
-    plt.ylabel("Sector")
-    plt.title("Sectors Leading the S&P 500: Script Consensus Ranking")
+    fig, ax = plt.subplots(figsize=(10, 6))
+    fig.patch.set_facecolor("white")
+
+    ax.barh(df["sector_label"], df["core_causal_score"],
+            color=bar_colors, linewidth=0)
+
+    ax.set_xlabel("Core Causal Score (Conditional VAR + PCMCI)", fontsize=11, color="#555", labelpad=8)
+    ax.set_title(
+        "Sectors Leading the S&P 500: Consensus Ranking",
+        fontsize=14, fontweight="bold", color="#111", pad=14, loc="left"
+    )
+    ax.text(
+        0, 1.01,
+        "Sorted by core causal score (CVAR + PCMCI)  ·  XGBoost excluded from ranking",
+        transform=ax.transAxes, fontsize=9, color="#888", va="bottom"
+    )
+    ax.xaxis.grid(True, color="#E5E5E5", linewidth=0.8, zorder=0)
+    ax.yaxis.grid(False)
+    for spine in ["top", "right", "bottom"]:
+        ax.spines[spine].set_visible(False)
+    ax.spines["left"].set_color("#CCCCCC")
+    ax.spines["left"].set_linewidth(0.8)
+    ax.tick_params(axis="both", length=0, pad=6)
+    ax.set_axisbelow(True)
+    ax.set_facecolor("white")
+    ax.tick_params(axis="y", labelsize=10, labelcolor="#222")
+    ax.tick_params(axis="x", labelsize=10, labelcolor="#555")
 
     plt.tight_layout()
-    plt.savefig(fig_dir / "sp500_sector_leader_ranking.png", dpi=300)
+    plt.savefig(fig_dir / "sp500_sector_leader_ranking.png", dpi=300,
+                bbox_inches="tight", facecolor="white")
     plt.show()
     plt.close()
 
 
 def plot_sp500_method_support(sp500_rank, fig_dir):
+
     df = sp500_rank.copy()
     df["sector_label"] = df["cause"].map(label_sector)
     df = df.sort_values("total_conditional_score", ascending=False)
 
     x = np.arange(len(df))
 
-    plt.figure(figsize=(11, 6))
+    fig, ax = plt.subplots(figsize=(11, 6))
+    fig.patch.set_facecolor("white")
 
-    plt.bar(x, df["cvar_support"], label="Conditional VAR")
-    plt.bar(
-        x,
-        df["pcmci_support"],
-        bottom=df["cvar_support"],
-        label="PCMCI",
+    ax.bar(x, df["cvar_support"],  color=C_CVAR,   linewidth=0, label="Conditional VAR", zorder=3)
+    ax.bar(x, df["pcmci_support"], color=C_PCMCI,  linewidth=0, label="PCMCI",
+           bottom=df["cvar_support"], zorder=3)
+    ax.bar(x, df["xgb_support"],   color=C_XGB,    linewidth=0, label="XGBoost",
+           bottom=df["cvar_support"] + df["pcmci_support"], zorder=3)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(df["sector_label"], rotation=45, ha="right",
+                       fontsize=10, color="#222")
+    ax.set_ylabel("Support Count Across Resolutions", fontsize=11,
+                  color="#555", labelpad=8)
+    ax.set_title(
+        "Method Support for Sectors Leading the S&P 500",
+        fontsize=14, fontweight="bold", color="#111", pad=14, loc="left"
     )
-    plt.bar(
-        x,
-        df["xgb_support"],
-        bottom=df["cvar_support"] + df["pcmci_support"],
-        label="XGBoost",
-    )
 
-    plt.xticks(x, df["sector_label"], rotation=45, ha="right")
+    legend_handles = [
+        mpatches.Patch(facecolor=C_CVAR,  label="Conditional VAR (Granger)"),
+        mpatches.Patch(facecolor=C_PCMCI, label="PCMCI"),
+        mpatches.Patch(facecolor=C_XGB,   label="XGBoost"),
+    ]
+    ax.legend(handles=legend_handles, frameon=False, fontsize=10,
+              labelcolor="#333", handlelength=1.2)
 
-    plt.ylabel("Support Count Across Resolutions")
-    plt.title("Method Support for Sectors Leading the S&P 500")
-    plt.legend()
+    _style_ax(ax)
 
     plt.tight_layout()
-    plt.savefig(fig_dir / "sp500_method_support_stacked.png", dpi=300)
+    plt.savefig(fig_dir / "sp500_method_support_stacked.png", dpi=300,
+                bbox_inches="tight", facecolor="white")
     plt.show()
     plt.close()
 
 
 def plot_consensus_heatmaps(consensus, fig_dir):
-    """
-    Blue-green heatmaps.
 
-    Score meaning:
-        0 = no method support
-        1 = one method supports edge
-        2 = two methods support edge
-        3 = all three methods support edge
-    """
     labels = [label_sector(t) for t in TICKERS]
 
     for resolution in FREQUENCIES:
@@ -621,50 +644,59 @@ def plot_consensus_heatmaps(consensus, fig_dir):
 
         matrix = matrix.reindex(index=TICKERS, columns=TICKERS)
 
-        plt.figure(figsize=(10, 8))
+        fig, ax = plt.subplots(figsize=(10, 8))
+        fig.patch.set_facecolor("white")
+        ax.set_facecolor("white")
 
-        # Blue-green color palette
-        plt.imshow(
+        im = ax.imshow(
             matrix,
             aspect="auto",
-            cmap="YlGnBu",
+            cmap=BLUE_CMAP,
             vmin=0,
             vmax=3,
         )
 
-        cbar = plt.colorbar(label="Total Consensus Score")
+        cbar = plt.colorbar(im, ax=ax, label="Total Consensus Score")
         cbar.set_ticks([0, 1, 2, 3])
+        cbar.ax.tick_params(labelsize=10, labelcolor="#555")
+        cbar.ax.yaxis.label.set_color("#555")
+        cbar.ax.yaxis.label.set_fontsize(11)
+        cbar.outline.set_visible(False)
 
-        plt.xticks(np.arange(len(TICKERS)), labels, rotation=45, ha="right")
-        plt.yticks(np.arange(len(TICKERS)), labels)
+        ax.set_xticks(np.arange(len(TICKERS)))
+        ax.set_yticks(np.arange(len(TICKERS)))
+        ax.set_xticklabels(labels, rotation=45, ha="right",
+                           fontsize=10, color="#222")
+        ax.set_yticklabels(labels, fontsize=10, color="#222")
 
-        plt.xlabel("Effect")
-        plt.ylabel("Cause")
-        plt.title(f"{resolution.capitalize()} Consensus Edge Heatmap")
+        ax.set_xlabel("Effect", fontsize=11, color="#555", labelpad=8)
+        ax.set_ylabel("Cause",  fontsize=11, color="#555", labelpad=8)
+        ax.set_title(
+            f"{resolution.capitalize()} Consensus Edge Heatmap",
+            fontsize=14, fontweight="bold", color="#111", pad=14, loc="left"
+        )
+
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.tick_params(length=0, pad=6)
 
         for i in range(len(TICKERS)):
             for j in range(len(TICKERS)):
                 val = matrix.iloc[i, j]
-
                 if pd.notna(val):
-                    text_color = "white" if val >= 2 else "black"
-                    plt.text(
-                        j,
-                        i,
-                        int(val),
-                        ha="center",
-                        va="center",
-                        color=text_color,
-                        fontsize=9,
-                    )
+                    text_color = "white" if val >= 2 else C_NAVY
+                    ax.text(j, i, int(val), ha="center", va="center",
+                            color=text_color, fontsize=9, fontweight="500")
 
         plt.tight_layout()
-        plt.savefig(fig_dir / f"consensus_heatmap_{resolution}.png", dpi=300)
+        plt.savefig(fig_dir / f"consensus_heatmap_{resolution}.png", dpi=300,
+                    bbox_inches="tight", facecolor="white")
         plt.show()
         plt.close()
 
 
 def plot_strongest_edges(consensus, fig_dir, top_n=15):
+
     strong = consensus[consensus["total_conditional_score"] > 0].copy()
 
     strong["edge_label"] = (
@@ -689,20 +721,43 @@ def plot_strongest_edges(consensus, fig_dir, top_n=15):
 
     strong = strong.sort_values("total_conditional_score", ascending=True)
 
-    plt.figure(figsize=(12, 7))
-    plt.barh(strong["edge_label"], strong["total_conditional_score"])
+    max_score = strong["total_conditional_score"].max() or 1
+    bar_colors = [
+        BLUE_CMAP(v / max_score) for v in strong["total_conditional_score"]
+    ]
 
-    plt.xlabel("Total Consensus Score")
-    plt.ylabel("Directed Edge")
-    plt.title(f"Top {top_n} Strongest Consensus Edges")
+    fig, ax = plt.subplots(figsize=(12, 7))
+    fig.patch.set_facecolor("white")
+
+    ax.barh(strong["edge_label"], strong["total_conditional_score"],
+            color=bar_colors, linewidth=0)
+
+    ax.set_xlabel("Total Consensus Score", fontsize=11, color="#555", labelpad=8)
+    ax.set_title(
+        f"Top {top_n} Strongest Consensus Edges",
+        fontsize=14, fontweight="bold", color="#111", pad=14, loc="left"
+    )
+    ax.xaxis.grid(True, color="#E5E5E5", linewidth=0.8, zorder=0)
+    ax.yaxis.grid(False)
+    for spine in ["top", "right", "bottom"]:
+        ax.spines[spine].set_visible(False)
+    ax.spines["left"].set_color("#CCCCCC")
+    ax.spines["left"].set_linewidth(0.8)
+    ax.tick_params(axis="both", length=0, pad=6)
+    ax.set_axisbelow(True)
+    ax.set_facecolor("white")
+    ax.tick_params(axis="y", labelsize=10, labelcolor="#222")
+    ax.tick_params(axis="x", labelsize=10, labelcolor="#555")
 
     plt.tight_layout()
-    plt.savefig(fig_dir / "top_strongest_consensus_edges.png", dpi=300)
+    plt.savefig(fig_dir / "top_strongest_consensus_edges.png", dpi=300,
+                bbox_inches="tight", facecolor="white")
     plt.show()
     plt.close()
 
 
 def plot_first_mover_sector_scores(consensus, fig_dir):
+
     df = consensus.copy()
 
     leader_scores = df.groupby("cause", as_index=False).agg(
@@ -732,15 +787,117 @@ def plot_first_mover_sector_scores(consensus, fig_dir):
         index=False,
     )
 
-    plt.figure(figsize=(10, 6))
-    plt.barh(leader_scores["sector_label"], leader_scores["total_outgoing_score"])
+    max_score = leader_scores["total_outgoing_score"].max() or 1
+    bar_colors = [
+        BLUE_CMAP(v / max_score) for v in leader_scores["total_outgoing_score"]
+    ]
 
-    plt.xlabel("Total Outgoing Consensus Score")
-    plt.ylabel("Sector")
-    plt.title("First-Mover Sector Ranking Across All Directed Edges")
+    fig, ax = plt.subplots(figsize=(10, 6))
+    fig.patch.set_facecolor("white")
+
+    ax.barh(leader_scores["sector_label"], leader_scores["total_outgoing_score"],
+            color=bar_colors, linewidth=0)
+
+    ax.set_xlabel("Total Outgoing Consensus Score", fontsize=11, color="#555", labelpad=8)
+    ax.set_title(
+        "First-Mover Sector Ranking Across All Directed Edges",
+        fontsize=14, fontweight="bold", color="#111", pad=14, loc="left"
+    )
+    ax.xaxis.grid(True, color="#E5E5E5", linewidth=0.8, zorder=0)
+    ax.yaxis.grid(False)
+    for spine in ["top", "right", "bottom"]:
+        ax.spines[spine].set_visible(False)
+    ax.spines["left"].set_color("#CCCCCC")
+    ax.spines["left"].set_linewidth(0.8)
+    ax.tick_params(axis="both", length=0, pad=6)
+    ax.set_axisbelow(True)
+    ax.set_facecolor("white")
+    ax.tick_params(axis="y", labelsize=10, labelcolor="#222")
+    ax.tick_params(axis="x", labelsize=10, labelcolor="#555")
 
     plt.tight_layout()
-    plt.savefig(fig_dir / "first_mover_sector_ranking.png", dpi=300)
+    plt.savefig(fig_dir / "first_mover_sector_ranking.png", dpi=300,
+                bbox_inches="tight", facecolor="white")
+    plt.show()
+    plt.close()
+
+
+def plot_core_causal_score(sp500_rank, fig_dir):
+
+    df = sp500_rank.copy()
+    df["sector_label"] = df["cause"].map(label_sector)
+    df["cvar_bar"]  = df["cvar_support"].clip(0, 1)
+    df["pcmci_bar"] = df["pcmci_support"].clip(0, 1)
+    df["core_causal_score"] = df["cvar_bar"] + df["pcmci_bar"]
+    df = df.sort_values("core_causal_score", ascending=False).reset_index(drop=True)
+
+    n = len(df)
+    x = np.arange(n)
+    stem_top = 2.35
+
+    fig, ax = plt.subplots(figsize=(11, 5.5))
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+
+    for i, (_, row) in enumerate(df.iterrows()):
+        if row["core_causal_score"] == 0:
+            ax.bar(i, 0.08, color=C_STEEL, width=0.55, linewidth=0, zorder=3)
+        else:
+            ax.bar(i, row["cvar_bar"], color=C_CVAR,
+                   width=0.55, linewidth=0, zorder=3)
+            ax.bar(i, row["pcmci_bar"], bottom=row["cvar_bar"],
+                   color=C_PCMCI, width=0.55, linewidth=0, zorder=3)
+
+    for i, (_, row) in enumerate(df.iterrows()):
+        bar_top = max(row["core_causal_score"], 0.08)
+        ax.plot([i, i], [bar_top, stem_top],
+                color=C_STEM, lw=1.4, zorder=2, solid_capstyle="butt")
+        ax.scatter(i, stem_top, color=C_STEM, s=38, zorder=4, clip_on=False)
+
+    ax.set_xlim(-0.6, n - 0.4)
+    ax.set_ylim(0, 2.6)
+    ax.set_yticks([0, 1, 2])
+    ax.set_yticklabels(["0", "1", "2"], fontsize=11, color="#555")
+    ax.set_ylabel("Core causal score  (max 2)", fontsize=11,
+                  color="#555", labelpad=10)
+
+    ax.set_xticks(x)
+    tick_labels = [
+        f"{row['cause']}\n({row['sector_label']})"
+        for _, row in df.iterrows()
+    ]
+    ax.set_xticklabels(tick_labels, fontsize=10, color="#222", ha="center")
+
+    _style_ax(ax)
+
+    ax.set_title(
+        "Which sectors causally lead the S&P 500?",
+        fontsize=14, fontweight="bold", color="#111", pad=18, loc="left"
+    )
+    ax.text(
+        0, 1.01,
+        "Core causal evidence only: Conditional VAR + PCMCI  ·  Daily lag-1  ·  XGBoost excluded",
+        transform=ax.transAxes,
+        fontsize=9, color="#888", va="bottom"
+    )
+
+    legend_handles = [
+        mpatches.Patch(facecolor=C_CVAR,  label="Conditional VAR (Granger)"),
+        mpatches.Patch(facecolor=C_PCMCI, label="PCMCI"),
+    ]
+    ax.legend(
+        handles=legend_handles,
+        loc="upper right",
+        frameon=False,
+        fontsize=10,
+        labelcolor="#333",
+        handlelength=1.2,
+        handleheight=1.0,
+    )
+
+    plt.tight_layout()
+    plt.savefig(fig_dir / "core_causal_score.png", dpi=300, bbox_inches="tight",
+                facecolor="white")
     plt.show()
     plt.close()
 
@@ -753,12 +910,12 @@ def make_all_plots(consensus, sp500_rank):
     plot_consensus_heatmaps(consensus, fig_dir)
     plot_strongest_edges(consensus, fig_dir, top_n=15)
     plot_first_mover_sector_scores(consensus, fig_dir)
+    plot_core_causal_score(sp500_rank, fig_dir)
 
     print(f"Saved figures to: {fig_dir.resolve()}")
 
 
 def main():
-    print("Phase 4: CVAR + PCMCI + XGBoost consensus")
 
     setup_output()
 
@@ -782,22 +939,4 @@ def main():
 
     make_all_plots(consensus, sp500_rank)
 
-    print("\nTop sectors predicting / leading ^GSPC:")
-    for _, row in sp500_rank.head(10).iterrows():
-        print(
-            f"{row['cause']}: "
-            f"total={int(row['total_conditional_score'])}, "
-            f"core={int(row['core_causal_score'])}, "
-            f"CVAR={int(row['cvar_support'])}, "
-            f"PCMCI={int(row['pcmci_support'])}, "
-            f"XGB={int(row['xgb_support'])}"
-        )
-
 main()
-
-
-# In[ ]:
-
-
-
-
